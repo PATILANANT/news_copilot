@@ -30,7 +30,7 @@ class RAGPipeline:
         fresh_data = await self.data_fetcher.fetch_all_sources(search_query)
         
         # Clear old data and add fresh data
-        self.vector_store.clear_collection()
+        self.vector_store.clear()  # CHANGED from clear_collection() to clear()
         self.vector_store.add_documents(fresh_data)
         
         print(f"✅ Updated knowledge base with {len(fresh_data)} documents")
@@ -73,10 +73,15 @@ class RAGPipeline:
                 unique_bullet_points.append(point)
         
         # Generate comprehensive answer
+        if unique_bullet_points:
+            bullet_points_text = chr(10).join(unique_bullet_points[:5])
+        else:
+            bullet_points_text = "• No specific points found in the current data."
+        
         answer = f"""Based on the latest information about {query}, here's what I found:
 
 📊 **Key Insights:**
-{chr(10).join(unique_bullet_points[:5])}
+{bullet_points_text}
 
 💡 **Summary:**
 The current market shows various trends and opportunities. It's important to consider multiple sources and perform due diligence before making investment decisions.
@@ -98,7 +103,7 @@ The current market shows various trends and opportunities. It's important to con
             await self.update_knowledge_base(user_query)
         
         # Search for relevant information
-        search_results = self.vector_store.search(user_query, n_results=5)
+        search_results = self.vector_store.search(user_query, k=5)  # CHANGED n_results to k
         
         if not search_results:
             return RAGResponse(

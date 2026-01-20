@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 import aiohttp
 import asyncio
 from newspaper import Article
-from config import settings
+from config import config  # CHANGED from settings to config
 
 class DataFetcher:
     def __init__(self):
@@ -26,8 +26,7 @@ class DataFetcher:
             # RSS Feeds (Free)
             rss_feeds = [
                 "https://feeds.finance.yahoo.com/rss/2.0/headline?s=&region=US&lang=en-US",
-                "https://www.bloomberg.com/feeds/podcasts/etf_report.xml",
-                "https://www.investing.com/rss/news_301.rss"
+                "https://www.investing.com/rss/news_301.rss"  # Removed broken feed
             ]
             
             for feed_url in rss_feeds:
@@ -57,24 +56,27 @@ class DataFetcher:
                 info = stock.info
                 news = stock.news
                 
-                data.append({
-                    "title": f"{symbol} Stock Info",
-                    "content": f"Current Price: {info.get('currentPrice', 'N/A')}, "
-                              f"Market Cap: {info.get('marketCap', 'N/A')}, "
-                              f"PE Ratio: {info.get('trailingPE', 'N/A')}",
-                    "url": f"https://finance.yahoo.com/quote/{symbol}",
-                    "source": "Yahoo Finance",
-                    "timestamp": datetime.now().isoformat()
-                })
-                
-                for item in news[:3]:
+                # Add basic info if available
+                if 'currentPrice' in info:
                     data.append({
-                        "title": item.get('title', ''),
-                        "content": item.get('summary', ''),
-                        "url": item.get('link', ''),
-                        "source": "Yahoo Finance News",
+                        "title": f"{symbol} Stock Info",
+                        "content": f"Current Price: {info.get('currentPrice', 'N/A')}, "
+                                  f"Market Cap: {info.get('marketCap', 'N/A')}, "
+                                  f"PE Ratio: {info.get('trailingPE', 'N/A')}",
+                        "url": f"https://finance.yahoo.com/quote/{symbol}",
+                        "source": "Yahoo Finance",
                         "timestamp": datetime.now().isoformat()
                     })
+                
+                if news:
+                    for item in news[:3]:
+                        data.append({
+                            "title": item.get('title', ''),
+                            "content": item.get('summary', ''),
+                            "url": item.get('link', ''),
+                            "source": "Yahoo Finance News",
+                            "timestamp": datetime.now().isoformat()
+                        })
         except Exception as e:
             print(f"Error fetching Yahoo Finance data: {e}")
         
@@ -108,7 +110,6 @@ class DataFetcher:
             urls = [
                 "https://www.investing.com/rss/news_25.rss",  # US Markets
                 "https://www.investing.com/rss/news_301.rss", # Stock Markets
-                "https://www.investing.com/rss/news_2.rss"   # Economy
             ]
             
             for url in urls:
@@ -125,27 +126,6 @@ class DataFetcher:
             print(f"Error fetching Investing.com: {e}")
         
         return data
-    
-    async def scrape_website_content(self, url: str) -> str:
-        """Scrape content from a website"""
-        try:
-            article = Article(url)
-            article.download()
-            article.parse()
-            return article.text
-        except:
-            try:
-                response = requests.get(url, headers=self.headers, timeout=10)
-                soup = BeautifulSoup(response.content, 'html.parser')
-                # Get main content
-                for tag in ['article', 'main', '.content', '.article-body']:
-                    content = soup.select_one(tag)
-                    if content:
-                        return content.get_text(strip=True)
-                return soup.get_text(strip=True)
-            except Exception as e:
-                print(f"Error scraping {url}: {e}")
-                return ""
     
     async def fetch_all_sources(self, query: str = "business investment news") -> List[Dict]:
         """Fetch data from all available sources"""
@@ -171,8 +151,8 @@ class DataFetcher:
         seen_urls = set()
         unique_data = []
         for item in all_data:
-            if item.get('url') not in seen_urls:
+            if item.get('url') and item.get('url') not in seen_urls:
                 seen_urls.add(item.get('url'))
                 unique_data.append(item)
         
-        return unique_data[:settings.max_results]
+        return unique_data[:config.MAX_RESULTS]  # CHANGED from settings to config
