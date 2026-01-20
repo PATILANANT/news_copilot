@@ -1,9 +1,10 @@
-from typing import List, Dict, Any
-import json
 from dataclasses import dataclass
-from simple_embedding_store import SimpleEmbeddingStore  # CHANGED
+from typing import List, Dict
+from vector_store import VectorStore
 from data_fetcher import DataFetcher
 import asyncio
+import datetime
+
 
 @dataclass
 class RAGResponse:
@@ -12,107 +13,77 @@ class RAGResponse:
     references: List[Dict[str, str]]
     sources: List[str]
 
+
 class RAGPipeline:
     def __init__(self):
-        self.vector_store = SimpleEmbeddingStore()  # CHANGED
-        self.data_fetcher = DataFetcher()
-    
-    async def update_knowledge_base(self, query: str = None):
-        """Update the knowledge base with fresh data"""
-        print("🔄 Updating knowledge base with fresh data...")
-        
-        if query:
-            search_query = query
-        else:
-            search_query = "business investment market news today"
-        
-        # Fetch fresh data
-        fresh_data = await self.data_fetcher.fetch_all_sources(search_query)
-        
-        # Clear old data and add fresh data
-        self.vector_store.clear()
-        self.vector_store.add_documents(fresh_data)
-        
-        print(f"✅ Updated knowledge base with {len(fresh_data)} documents")
-        return fresh_data
-    
-    def format_response(self, query: str, search_results: List[Dict]) -> RAGResponse:
-        """Format the response in structured way"""
-        
-        # Extract information from search results
-        sources_used = []
-        all_bullet_points = []
-        references = []
-        
-        for result in search_results:
-            content = result["content"]
-            metadata = result["metadata"]
-            
-            # Create bullet points from content (simplified extraction)
-            lines = content.split('.')  # Split by sentences
-            for line in lines[:3]:  # Take first 3 sentences
-                line = line.strip()
-                if len(line) > 20:  # Only meaningful lines
-                    all_bullet_points.append(f"• {line}")
-            
-            # Add to references
-            references.append({
-                "title": metadata.get("title", "Untitled"),
-                "url": metadata.get("url", ""),
-                "source": metadata.get("source", "Unknown"),
-                "timestamp": metadata.get("timestamp", "")
-            })
-            
-            sources_used.append(metadata.get("source", "Unknown"))
-        
-        # Remove duplicate bullet points
-        unique_bullet_points = []
-        seen = set()
-        for point in all_bullet_points:
-            if point not in seen:
-                seen.add(point)
-                unique_bullet_points.append(point)
-        
-        # Generate comprehensive answer
-        if unique_bullet_points:
-            bullet_points_text = chr(10).join(unique_bullet_points[:5])
-        else:
-            bullet_points_text = "• No specific points found in the current data."
-        
-        answer = f"""Based on the latest information about {query}, here's what I found:
+        self.store = VectorStore()
+        self.fetcher = DataFetcher()
 
-📊 **Key Insights:**
-{bullet_points_text}
+    async def refresh_knowledge(self, query: str):
+        news = await self.fetcher.fetch_all_sources(query)
+        self.store.clear()
+        self.store.add_documents(news)
+        return news
 
-💡 **Summary:**
-The current market shows various trends and opportunities. It's important to consider multiple sources and perform due diligence before making investment decisions.
+    def _build_context(self, results: List[Dict]) -> str:
+        context = ""
+        for r in results:
+            m = r["metadata"]
+            context += (
+                f"Source: {m['source']}\n"
+                f"Title: {m['title']}\n"
+                f"Date: {m['timestamp']}\n"
+                f"Content: {r['content']}\n"
+                "----\n"
+            )
+        return context
 
-⚠️ **Disclaimer:** This information is for educational purposes only and not financial advice."""
+    def _llm_answer(self, query: str, context: str) -> str:
+        """
+        🔴 Replace this with OpenAI / Azure / Gemini call
+        """
+        return f"""
+Based on the latest retrieved news:
 
-        return RAGResponse(
-            answer=answer,
-            bullet_points=unique_bullet_points[:10],
-            references=references[:5],
-            sources=list(set(sources_used))
-        )
-    
-    async def query(self, user_query: str, use_fresh_data: bool = True) -> RAGResponse:
-        """Main query method"""
-        
+{context[:1500]}
+
+Summary:
+• Market sentiment is mixed with sector-specific movements
+• Investors are reacting to macroeconomic and earnings signals
+• Volatility remains due to global factors
+
+⚠️ This is not financial advice.
+"""
+
+    async def query(self, query: str, use_fresh_data: bool = True) -> RAGResponse:
         if use_fresh_data:
-            # Update with fresh data related to query
-            await self.update_knowledge_base(user_query)
-        
-        # Search for relevant information
-        search_results = self.vector_store.search(user_query, k=5)
-        
-        if not search_results:
+            await self.refresh_knowledge(query)
+
+        results = self.store.search(query, k=5)
+        if not results:
             return RAGResponse(
-                answer="No relevant information found in our current knowledge base.",
+                answer="No relevant news found.",
                 bullet_points=[],
                 references=[],
                 sources=[]
             )
-        
-        # Format response
-        return self.format_response(user_query, search_results)
+
+        context = self._build_context(results)
+        answer = self._llm_answer(query, context)
+
+        bullets = []
+        refs = []
+        sources = set()
+
+        for r in results:
+            m = r["metadata"]
+            bullets.append(m["title"])
+            refs.append(m)
+            sources.add(m["source"])
+
+        return RAGResponse(
+            answer=answer,
+            bullet_points=bullets[:5],
+            references=refs[:5],
+            sources=list(sources)
+        )
